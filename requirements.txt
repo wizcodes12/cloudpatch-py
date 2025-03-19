@@ -3,7 +3,7 @@ uvicorn
 python-dotenv
 requests
 aiohttp
-python-magic-bin
+python-magic
 torch
 transformers
 scikit-learn
