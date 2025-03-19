@@ -15,8 +15,5 @@ passlib[bcrypt]
 pyjwt
 python-magic
 loguru
-asyncio
-traceback
-ipaddress
 itsdangerous
 pymongo
