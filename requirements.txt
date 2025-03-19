@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-dotenv
+requests
+aiohttp
+python-magic-bin
+torch
+transformers
+scikit-learn
+pandas
+reportlab
