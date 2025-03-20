@@ -73,6 +73,15 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 
@@ -195,7 +204,13 @@ model = None
 tokenizer = None
 
 # Middleware
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS").split(",")
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "https://cloudpatch-frontend.onrender.com",
+    "electron://app"
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -211,6 +226,19 @@ app.add_middleware(
     same_site="lax",
     https_only=False
 )
+
+# Add request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"Request path: {request.url.path}")
+    logger.info(f"Request headers: {request.headers}")
+    
+    response = await call_next(request)
+    
+    logger.info(f"Response status code: {response.status_code}")
+    return response
+
+
 from io import BytesIO
 from datetime import datetime
 import traceback
