@@ -203,20 +203,49 @@ MODEL_PATH = "./final_model"  # Changed to look in current directory
 model = None
 tokenizer = None
 
-# Middleware
+# Middlewarefrom fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+##---this part -- new
+# CORS Middleware configuration 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
-    "http://localhost:8000",
+    "http://localhost:8000", 
     "https://cloudpatch-frontend.onrender.com",
-    "electron://app"
+    "electron://app",
+    "*"
 ]
 
+# Add a middleware to log all requests
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    print(f"Request: {request.method} {request.url}")
+    print(f"Request headers: {request.headers}")
+    
+    # Extract Origin header
+    origin = request.headers.get("origin")
+    print(f"Request origin: {origin}")
+    
+    response = await call_next(request)
+    
+    # If origin is allowed, set CORS headers for non-OPTIONS requests too
+    if origin and (origin in ALLOWED_ORIGINS or "localhost" in origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        
+    return response
+
+# Add proper CORS middleware with expanded options
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https?://localhost(:\d+)?",  # Allow all localhost origins regardless of port
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["Authorization", "Content-Disposition"],
+    max_age=86400,  # Cache preflight requests for 24 hours
 )
 
 app.add_middleware(
@@ -227,17 +256,19 @@ app.add_middleware(
     https_only=False
 )
 
-# Add request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    logger.info(f"Request path: {request.url.path}")
-    logger.info(f"Request headers: {request.headers}")
+# Add error handler for CORS errors
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    # Log the error
+    print(f"Global exception: {str(exc)}")
+    print(f"Request details: {request.method} {request.url}")
+    print(f"Request headers: {request.headers}")
     
-    response = await call_next(request)
-    
-    logger.info(f"Response status code: {response.status_code}")
-    return response
-
+    # Return a JSON response
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+    )
 
 from io import BytesIO
 from datetime import datetime
