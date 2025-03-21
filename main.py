@@ -211,42 +211,41 @@ from fastapi.responses import JSONResponse
 # CORS Middleware configuration 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
-    "http://localhost:8000", 
+    "http://localhost:8000",
     "https://cloudpatch-frontend.onrender.com",
-    "electron://app",
-    "*"
+    "electron://app"
 ]
 
-# Add a middleware to log all requests
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,  # No wildcard
+    allow_origin_regex=r"https?://localhost(:\d+)?",  # For local development flexibility
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Authorization", "Content-Disposition"],
+    max_age=86400,
+)
+
+# Custom middleware to dynamically set the origin
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     print(f"Request: {request.method} {request.url}")
     print(f"Request headers: {request.headers}")
     
-    # Extract Origin header
     origin = request.headers.get("origin")
-    print(f"Request origin: {origin}")
-    
     response = await call_next(request)
     
-    # If origin is allowed, set CORS headers for non-OPTIONS requests too
+    # Set CORS headers dynamically based on the request origin
     if origin and (origin in ALLOWED_ORIGINS or "localhost" in origin):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
-        
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, User-Agent, Origin, X-Requested-With"
+    
+    print(f"Response headers: {response.headers}")
     return response
-
-# Add proper CORS middleware with expanded options
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"https?://localhost(:\d+)?",  # Allow all localhost origins regardless of port
-    allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
-    expose_headers=["Authorization", "Content-Disposition"],
-    max_age=86400,  # Cache preflight requests for 24 hours
-)
 
 app.add_middleware(
     SessionMiddleware, 
