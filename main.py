@@ -4,6 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import RedirectResponse, JSONResponse, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
+import uuid
+import time
+from fastapi import APIRouter, Request, Response, HTTPException, Depends, Query
+from pydantic import BaseModel
 
 # Pydantic
 from pydantic import BaseModel
@@ -83,6 +87,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+issue_sessions = {}
 
 
 load_dotenv()
@@ -125,6 +130,9 @@ class RepoContent(BaseModel):
     sha: str
     size: Optional[int]
     content: Optional[List[FileContent]] = None
+class IssueSessionRequest(BaseModel):
+    title: str
+    body: str
 
 
 class FixRequest(BaseModel):
@@ -2232,6 +2240,70 @@ async def logout(request: Request):
     request.session.clear()  # Clear all session data
     return {"message": "Logged out successfully"}
 
+
+
+
+@app.post("/create-issue-session")
+async def create_issue_session(
+    request: Request,
+    session_data: IssueSessionRequest
+):
+    """Create a temporary session for GitHub issue creation to avoid exposing tokens in URLs."""
+    try:
+        # Extract token from Authorization header
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail="Missing or invalid Authorization header"
+            )
+
+        token = auth_header.replace("Bearer ", "")
+
+        # Validate the token with GitHub
+        try:
+            headers = {
+                "Authorization": f"token {token}",
+                "Accept": "application/json"
+            }
+            github_response = requests.get("https://api.github.com/user", headers=headers)
+
+            if github_response.status_code != 200:
+                raise HTTPException(
+                    status_code=401,
+                    detail="GitHub token is invalid or expired"
+                )
+        except requests.RequestException as token_error:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Failed to validate GitHub token: {str(token_error)}"
+            )
+
+        # Create a session ID
+        session_id = str(uuid.uuid4())
+        
+        # Store session data with expiration (30 minutes)
+        issue_sessions[session_id] = {
+            "token": token,
+            "title": session_data.title,
+            "body": session_data.body,
+            "expires_at": time.time() + 1800  # 30 minutes
+        }
+        
+        return {
+            "status": "success",
+            "session_id": session_id
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        print(f"Error in create_issue_session: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 import logging
 from fastapi import Query, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -2947,12 +3019,138 @@ async function someAsyncFunction() {
 @app.get("/github-issue-creator")
 async def github_issue_creator(
     request: Request,
-    token: str = Query(...),
-    title: str = Query(""),
-    body: str = Query("")
+    session_id: str = Query(None),
+    token: str = Query(None),  # Keeping for backward compatibility
+    title: str = Query(""),  # Keeping for backward compatibility
+    body: str = Query("")   # Keeping for backward compatibility
 ):
-    """Serve the GitHub issue creator HTML page with the provided parameters."""
+    """Serve the GitHub issue creator HTML page with the provided session or parameters."""
     try:
+        # First, check if we have a session_id and use it
+        if session_id and session_id in issue_sessions:
+            session_data = issue_sessions[session_id]
+            
+            # Check if session is expired
+            if session_data["expires_at"] < time.time():
+                del issue_sessions[session_id]  # Clean up expired session
+                return HTMLResponse(content=f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Session Expired</title>
+                    <style>
+                        body {{ 
+                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                            text-align: center;
+                            padding: 50px;
+                            background: linear-gradient(135deg, #0d1117, #161b22);
+                            color: #c9d1d9;
+                            margin: 0;
+                        }}
+                        .card {{
+                            background-color: #0d1117;
+                            border-radius: 6px;
+                            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                            padding: 24px;
+                            max-width: 400px;
+                            margin: 0 auto;
+                            border: 1px solid #30363d;
+                        }}
+                        .error {{ 
+                            color: #f85149;
+                            font-size: 24px;
+                            margin-bottom: 20px;
+                        }}
+                        .button {{ 
+                            padding: 8px 16px;
+                            background-color: #238636;
+                            color: white; 
+                            border: none;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            font-size: 14px;
+                            font-weight: 500;
+                            transition: background-color 0.2s;
+                        }}
+                        .button:hover {{ 
+                            background-color: #2ea043;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <div class="card">
+                        <h1 class="error">Session Expired</h1>
+                        <p>Your session has expired. Please return to the main application and try again.</p>
+                        <button class="button" onclick="window.close()">Close Window</button>
+                    </div>
+                </body>
+                </html>
+                """)
+            
+            # Use session data
+            token = session_data["token"]
+            title = session_data["title"]
+            body = session_data["body"]
+            
+            # Clean up the session after use
+            del issue_sessions[session_id]
+        
+        # Fall back to query parameters if no valid session (for backward compatibility)
+        elif not token:
+            return HTMLResponse(content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Invalid Session</title>
+                <style>
+                    body {{ 
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                        text-align: center;
+                        padding: 50px;
+                        background: linear-gradient(135deg, #0d1117, #161b22);
+                        color: #c9d1d9;
+                        margin: 0;
+                    }}
+                    .card {{
+                        background-color: #0d1117;
+                        border-radius: 6px;
+                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                        padding: 24px;
+                        max-width: 400px;
+                        margin: 0 auto;
+                        border: 1px solid #30363d;
+                    }}
+                    .error {{ 
+                        color: #f85149;
+                        font-size: 24px;
+                        margin-bottom: 20px;
+                    }}
+                    .button {{ 
+                        padding: 8px 16px;
+                        background-color: #238636;
+                        color: white; 
+                        border: none;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 14px;
+                        font-weight: 500;
+                        transition: background-color 0.2s;
+                    }}
+                    .button:hover {{ 
+                        background-color: #2ea043;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h1 class="error">Invalid Session</h1>
+                    <p>No valid session found. Please return to the main application and try again.</p>
+                    <button class="button" onclick="window.close()">Close Window</button>
+                </div>
+            </body>
+            </html>
+            """)
+        
         # Pre-fetching in parallel to improve performance
         async def validate_token():
             headers = {
